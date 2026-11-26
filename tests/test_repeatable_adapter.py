@@ -409,7 +409,7 @@ class LocalGraphTests(unittest.TestCase):
         """Pots, trees, rocks...: the first-collection pickup is built on a falling drop."""
         from oot_rando.formats.inspect_nup import Nup
         from oot_rando.formats.inspect_resources import dictionaries
-        from oot_rando.game.item_forms import DROP_TEMPLATE, resolve_components
+        from oot_rando.game.item_forms import DROP_TEMPLATE, replacement_bundle_actor, resolve_components
         from oot_rando.game.world_maps import effective_members
         from oot_rando.patching.repeatable_adapter import build_repeatable_packs
         from oot_rando.patching.soul_adapter import RSDB_FILES
@@ -438,6 +438,11 @@ class LocalGraphTests(unittest.TestCase):
                        for i, (source, canonical) in enumerate((('trees', 'Item_Hookshot'), ('pots', 'TBox_Rupee_Red'),
                                                                 ('crates', 'Item_Dungeon_SmallKey'),
                                                                 ('rocks', 'TBox_ArrowBundle_Small')))]
+            records.append({'id': 'zone#rocks#bundle', 'actor': 'Obj_RandoOnce_0000000000000004',
+                            'canonical': 'TBox_DekuNutBundle', 'kind': 'pickup',
+                            'original_reward_actor': replacement_bundle_actor('TBox_DekuNutBundle', 'world'),
+                            'flag': 'Rando.Check.0000000000000004',
+                            'event_filename': 'RandoOnce_0000000000000004.event.root', 'variants': []})
             new = build_repeatable_packs(records, read_pack, read_raw, tables)
             source_drops = {name: resolve_components(read_pack(name), name, byml_codec)['DropRef']
                             for name in ('Obj_Tree_A_01', 'Obj_Pot_A_01')}
@@ -464,7 +469,11 @@ class LocalGraphTests(unittest.TestCase):
                 from oot_rando.patching.repeatable_adapter import is_minor_reward
                 # Minor rewards: the get window only for the first item of its kind ever got.
                 self.assertIs(pouch['PlayGetEventManyTimes'], not is_minor_reward(record['canonical']))
-                self.assertEqual(pouch['PouchActor'], f'Work/Actor/{record["canonical"]}.engine__actor__ActorParam.gyml')
+                if record.get('original_reward_actor'):
+                    self.assertEqual(pouch['BundleActorNum'], 5)
+                    self.assertEqual(pouch['PouchActor'], pouch['BundleActor'])
+                else:
+                    self.assertEqual(pouch['PouchActor'], f'Work/Actor/{record["canonical"]}.engine__actor__ActorParam.gyml')
                 for rows in tables.values():
                     self.assertEqual(sum(1 for row in rows if row['__RowId'] == actor), 1)
                 # Its own drop AI: deleted on spawn once the check is collected.

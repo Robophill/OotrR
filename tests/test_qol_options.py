@@ -12,6 +12,7 @@ from oot_rando.gui.randomizer_gui import Application, OPTIONS, SKIP_OPTIONS
 from oot_rando.logic import rando_options
 from oot_rando.randomizer.randomizer_core import Settings
 from oot_rando.randomizer import settings_string
+from oot_rando.patching.item_replacements import DEFAULT_ECONOMY_PRESET, ECONOMY_PRESETS
 from oot_rando.tracker.turbo_a import ATurbo
 
 
@@ -20,6 +21,9 @@ class QolOptionsTests(unittest.TestCase):
         self.tcl = tk.Tcl()
         self.app = Application.__new__(Application)
         self.app.seed = tk.StringVar(self.tcl, 'qol-options')
+        self.app.economy_preset = tk.StringVar(self.tcl, DEFAULT_ECONOMY_PRESET)
+        self.app.economy_display = tk.StringVar(
+            self.tcl, ECONOMY_PRESETS[DEFAULT_ECONOMY_PRESET].label)
         self.app.options = {name: tk.BooleanVar(self.tcl, True) for name, _ in OPTIONS}
         self.app.options['randomize_chests'].set(False)
         self.app.full_enabled = tk.BooleanVar(self.tcl, False)
@@ -27,6 +31,15 @@ class QolOptionsTests(unittest.TestCase):
                               for option in rando_options.OPTIONS if option.kind == 'bool'}
         self.app.pool, self.app.excluded, self.app.categories = {}, {}, {}
         self.app.update_category_states = Mock()
+
+    def test_economy_preset_round_trips_through_seed_settings(self):
+        self.app.economy_preset.set('vanilla')
+        settings = self.app.get_settings()
+        self.assertEqual(settings.economy_preset, 'vanilla')
+
+        self.app.apply_settings(Settings('reloaded', economy_preset='better_rupees'))
+        self.assertEqual(self.app.economy_preset.get(), 'better_rupees')
+        self.assertEqual(self.app.economy_display.get(), ECONOMY_PRESETS['better_rupees'].label)
 
     def test_each_skip_combination_round_trips_without_forcing_on(self):
         for flags in itertools.product((False, True), repeat=len(SKIP_OPTIONS)):

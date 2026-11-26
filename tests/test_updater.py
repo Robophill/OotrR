@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import ssl
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -35,6 +36,20 @@ def release():
 
 
 class UpdaterTest(unittest.TestCase):
+    def test_missing_certifi_reports_an_actionable_update_error(self):
+        with patch.dict(sys.modules, {'certifi': None}):
+            with self.assertRaisesRegex(updater.UpdateError, r'certifi.*python -m pip install -r requirements.txt'):
+                updater.latest_release()
+            with patch.object(updater, 'FROZEN', True):
+                with self.assertRaisesRegex(updater.UpdateError, r'certifi.*Reinstall the portable application'):
+                    updater.latest_release()
+
+    def test_unrelated_missing_module_is_not_misreported_as_certifi(self):
+        error = ModuleNotFoundError("No module named 'other'", name='other')
+        with patch.object(updater, 'tls_context', side_effect=error):
+            with self.assertRaisesRegex(ModuleNotFoundError, 'other'):
+                updater.latest_release()
+
     def test_tls_bundle_works_without_system_certificates(self):
         # Frozen builds must still trust public roots on a machine with an empty store.
         empty = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

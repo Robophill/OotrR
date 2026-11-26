@@ -43,3 +43,4 @@ desktop.ini
 
 # Local feature tracking
 FEATURES_TODO.md
+tools/update-current-branch.ps1

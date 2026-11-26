@@ -7,7 +7,7 @@ from oot_rando.formats.inspect_resources import sarc
 from oot_rando.game.item_forms import (DROP_PREFIX, DROP_TEMPLATE, GLOW_ACTOR, GLOW_ELINK, NATIVE_WORLD,
                                        WORLD_POUCH_FLAGS, WORLD_TEMPLATE,
                                        add_rsdb_rows, build_pack, canonical_of, form_actor, is_derived, underwater_actor,
-                                       is_world_derived, resolve_components, _table_components)
+                                       is_world_derived, replacement_bundle_actor, resolve_components, _table_components)
 
 # Components that make the gold token's AI save the skulltula it drops from
 # (REALAZK pickup_pack/kit.rs, MIT, ae9e4063: REFS and LIFE_REF).
@@ -105,6 +105,32 @@ class DerivedGameParameterTests(unittest.TestCase):
 
 
 class EnvironmentDropTests(unittest.TestCase):
+    def test_replacement_bundle_keeps_requested_quantity(self):
+        packs = fake_packs()
+        canonical = 'TBox_DekuNutBundle'
+        packs[canonical] = {
+            f'Actor/{canonical}.engine__actor__ActorParam.bgyml': doc({'Components': {
+                'PouchContentRef': '?Component/PouchContentParam/NutBundle.bgyml'}}),
+            'Component/PouchContentParam/NutBundle.bgyml': doc({
+                'BundleActor': 'Work/Actor/Item_DekuNut.engine__actor__ActorParam.gyml',
+                'BundleActorNum': 3, 'IsBundle': True}),
+        }
+        actor = replacement_bundle_actor(canonical, 'drop')
+        self.assertEqual(canonical_of(actor), canonical)
+        self.assertLessEqual(len(actor), 25)
+        files = sarc(build_pack(actor, packs.get, byml_codec)[0])
+        components = resolve_components(files, actor, byml_codec)
+        pouch = byml_codec.load(files[components['PouchContentRef'][1:]])['root']
+        self.assertEqual(pouch['BundleActorNum'], 5)
+        self.assertTrue(pouch['IsBundle'])
+        self.assertEqual(pouch['PouchActor'], 'Work/Actor/Item_DekuNut.engine__actor__ActorParam.gyml')
+
+    def test_drop_form_keeps_falling_native_pickups_and_converts_standing_ones(self):
+        self.assertEqual(form_actor('TBox_Rupee_Green', 'drop'), 'Obj_Rupee_Green')
+        self.assertEqual(form_actor('Item_Bottle_Milk', 'drop'), 'Obj_RandoDrop_Item_Bottle_Milk')
+        self.assertEqual(form_actor('Item_Token_Gold', 'drop'), 'Obj_RandoDrop_Item_Token_Gold')
+        self.assertEqual(form_actor('Obj_Heart_Piece', 'drop'), 'Obj_RandoDrop_Obj_Heart_Piece')
+
     def test_drop_names_round_trip(self):
         actor = DROP_PREFIX + 'Item_Hookshot'
         self.assertTrue(is_world_derived(actor))
@@ -218,6 +244,22 @@ class RealPackNameTests(unittest.TestCase):
     def read_pack(self, name):
         path = f'Pack/Actor/{name}.pack.zs'
         return sarc(self.read_raw(path)) if path in self.members else None
+
+    def test_replacement_ammo_packs_preserve_named_quantities(self):
+        for canonical, count in (('TBox_DekuNutBundle', 5), ('Item_BombBundle_Small', 5),
+                                 ('Item_BombchuBundle_Small', 5), ('Item_BombchuBundle_Large', 10),
+                                 ('TBox_ArrowBundle_Small', 5), ('TBox_ArrowBundle_Medium', 10),
+                                 ('TBox_ArrowBundle_Large', 30), ('TBox_DekuSeedBundle', 30)):
+            for form in ('world', 'drop'):
+                with self.subTest(canonical=canonical, form=form):
+                    actor = replacement_bundle_actor(canonical, form)
+                    self.assertLessEqual(len(actor), 25)
+                    files = sarc(build_pack(actor, self.read_pack, byml_codec)[0])
+                    components = resolve_components(files, actor, byml_codec)
+                    pouch = byml_codec.load(files[components['PouchContentRef'][1:]])['root']
+                    self.assertEqual(pouch['BundleActorNum'], count)
+                    self.assertEqual(pouch['PouchActor'], pouch['BundleActor'])
+                    self.assertTrue(pouch['IsBundle'])
 
     def test_soul_actor_name_is_its_own(self):
         """IsGet.<ActorName> is the flag the enemies wait for: it must be the soul's name."""

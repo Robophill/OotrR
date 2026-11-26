@@ -11,7 +11,9 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 from oot_rando.randomizer.randomizer_core import Settings, CHECKS, GENERATOR_VERSION
-from oot_rando.randomizer.randomizer_services import (read_artifact,
+from oot_rando.patching.item_replacements import (DEFAULT_ECONOMY_PRESET, ECONOMY_DESCRIPTION, ECONOMY_PRESETS,
+                                                   economy_preset_tooltip)
+from oot_rando.randomizer.randomizer_services import (read_artifact, qol_seed_warning,
                                                       regeneration_settings, validate_mod_directory)
 from oot_rando.randomizer.qol_install import install_qol
 from oot_rando.tracker.auto_tracker import TrackerSession, find_save_slots, newest_save
@@ -58,6 +60,7 @@ TRACKER_KINDS = {
 }
 
 OPTION_COPY = {
+    'economy_preset': ('Rupee Mania', ECONOMY_DESCRIPTION),
     'accessibility': ('Accessibility goal', 'Choose whether every location must be reachable or finishing the game is enough.'),
     'shuffle_chests': ('Shuffle chest contents', 'Important items can be in any selected chest.'),
     'chest_matching': ('Locations used for progression', 'Identified chests: exact matches. By zone: more chests, with the most cautious access conditions of the zone.'),
@@ -86,6 +89,10 @@ OPTION_COPY = {
     'logic_no_night_tokens_without_suns_song': ("Night skulltulas need Sun's Song",
                                                  'Waiting for the night is not expected by the logic.'),
 }
+ECONOMY_OPTION = rando_options.Option(
+    'economy_preset', 'Items', OPTION_COPY['economy_preset'][0],
+    tuple((key, preset.label, None) for key, preset in ECONOMY_PRESETS.items()),
+    DEFAULT_ECONOMY_PRESET, help=OPTION_COPY['economy_preset'][1])
 # Longer explanations, shown in the tooltip of each setting (hover the label or the ⓘ).
 # Missing entries use the short text above (OPTION_COPY) or the option's own help.
 OPTION_TIPS = {
@@ -192,7 +199,7 @@ SETTING_GROUPS = (
     ('Logic and accessibility', '',
      ['accessibility', 'logic_no_night_tokens_without_suns_song', 'game:skulltulas_always_present']),
     ('Item pool', 'What is shuffled and what you start with.',
-     ['item_pool_value', 'start_inventory_from_pool', 'shuffle_kokiri_sword',
+     ['item_pool_value','game:economy', 'start_inventory_from_pool', 'shuffle_kokiri_sword',
       'shuffle_master_sword', 'shuffle_gerudo_card', 'shuffle_remake_items', 'blue_fire_arrows']),
     ('Shuffled locations', 'Where items can be found.',
      ['shuffle_chests', 'chest_matching', 'tokensanity', 'shuffle_freestanding_items', 'shuffle_npc_gifts',
@@ -292,6 +299,8 @@ class Application(PartiesPage):
         self.tracker_details, self.tracker_signature = {}, None
         self.hotkey_thread_id = None
         self.seed = tk.StringVar(value=secrets.token_hex(8))
+        self.economy_preset = tk.StringVar(value=DEFAULT_ECONOMY_PRESET)
+        self.economy_display = tk.StringVar(value=ECONOMY_PRESETS[DEFAULT_ECONOMY_PRESET].label)
         self.nup, self.mods = tk.StringVar(), tk.StringVar()
         self.options = {name: tk.BooleanVar(value=True) for name, _ in OPTIONS}
         self.options['randomize_chests'].set(False)
@@ -785,8 +794,12 @@ class Application(PartiesPage):
             for index, name in enumerate(names):
                 if name.startswith('game:'):
                     key = name[len('game:'):]
-                    text = GAME_OPTION_COPY[key]
-                    self.switch_row(rows, index, text, self.options[key], tip=text + '\n' + OPTION_TIPS[key])
+                    if key == 'economy':
+                        self.option_row(rows, index, ECONOMY_OPTION, variable=self.economy_preset,
+                                        display=self.economy_display, tip=economy_preset_tooltip())
+                    else:
+                        text = GAME_OPTION_COPY[key]
+                        self.switch_row(rows, index, text, self.options[key], tip=text + '\n' + OPTION_TIPS[key])
                 else:
                     self.option_row(rows, index, visible[name])
         box = self.card(details, 'Quality of life', 'Choose each option for your game. Turbo A applies to this app.')
@@ -1220,11 +1233,14 @@ class Application(PartiesPage):
 
 
     # ------------------------------------------------------- complete mode
-    def option_row(self, parent, index, option):
+    def option_row(self, parent, index, option, variable=None, display=None, tip=None):
         label, help_text = OPTION_COPY.get(option.name, (option.label, option.help))
-        tip = option_tip(option, label, help_text)
+        tip = tip if tip is not None else option_tip(option, label, help_text)
+        external_variable = variable is not None
         def describe():
-            self.update_presets()
+            # self.full_reason.set(label + ' — ' + (help_text or 'Choose the value that suits your game.'))
+            # self.update_presets()
+            return
         if option.kind in ('items', 'list'):
             variable = ItemsVar() if option.kind == 'items' else ListVar(option)
             widget = ttk.Entry(parent, textvariable=variable.text, width=40) if parent else None
@@ -1242,18 +1258,23 @@ class Application(PartiesPage):
                     return 'Identified chests' if value == 'strict' else 'Access by zone'
                 return text
             labels = [choice_label(value, text) for value, text, reason in option.values]
-            variable = tk.StringVar(value=option.default)
-            display = tk.StringVar(value=labels[[v for v, label, reason in option.values].index(option.default)])
+            if variable is None:
+                variable = tk.StringVar(value=option.default)
+            if display is None:
+                display = tk.StringVar(value=labels[[v for v, label, reason in option.values].index(option.default)])
             variable.display, variable.labels = display, labels
             allowed = [choice_label(value, text) for value, text, reason in option.values if reason is None
                        and not (option.name == 'spiritual_stones' and value == 'door')]
-            widget = ttk.Combobox(parent, state='readonly', values=allowed, textvariable=display, width=30) if parent else None
+            widget = ttk.Combobox(parent, state='readonly', values=allowed, textvariable=display, width=30,
+                                  takefocus=None if external_variable else 0) if parent else None
             if widget:
                 def selected(event=None):
                     variable.set(option.values[labels.index(display.get())][0])
                     describe()
                 widget.bind('<<ComboboxSelected>>', selected)
-        self.full_vars[option.name] = variable
+                widget.unbind_class("TCombobox", "<MouseWheel>")
+        if not external_variable:
+            self.full_vars[option.name] = variable
         if widget:
             if option.kind != 'bool':
                 text_label, icon = self.label_cell(parent, index, label, tip, wraplength=460)
@@ -1261,7 +1282,6 @@ class Application(PartiesPage):
                 theme.Tooltip((text_label, icon), tip, self.fonts)
                 if index:
                     theme.rule(parent).grid(row=index, column=0, columnspan=2, sticky='new')
-            widget.bind('<FocusIn>', lambda event: describe(), add='+')
 
     def full_value(self, option):
         return self.full_vars[option.name].get()
@@ -1390,10 +1410,13 @@ class Application(PartiesPage):
             categories = dict.fromkeys(categories, False)  # carried by the complete-mode options
         return Settings(seed=self.seed.get(), pool=[n for n, v in self.pool.items() if v.get()],
                         excluded_checks=[n for n, v in self.excluded.items() if v.get()],
-                        categories=categories, full=full, **options).validate()
+                        categories=categories, full=full, economy_preset=self.economy_preset.get(),
+                        **options).validate()
 
     def apply_settings(self, settings):
         self.seed.set(settings.seed)
+        self.economy_preset.set(settings.economy_preset)
+        self.economy_display.set(ECONOMY_PRESETS[settings.economy_preset].label)
         for name, variable in self.options.items():
             variable.set(getattr(settings, name))
         # The old complete-mode alias and the general setting share one control.

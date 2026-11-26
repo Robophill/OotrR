@@ -31,7 +31,8 @@ import uuid
 from oot_rando.formats import byml_codec
 from oot_rando.formats.inspect_resources import sarc
 from oot_rando.game.item_forms import (WORLD_CANONICAL, DROP_PREFIX, SHOP_PREFIX, build_pack, canonical_of,
-                        is_derived, add_rsdb_rows, resolve_components, underwater_actor, _copy_ref, _pack_path)
+                        is_derived, add_rsdb_rows, replacement_bundle_actor, resolve_components, underwater_actor,
+                        _copy_ref, _pack_path)
 from oot_rando.patching.soul_adapter import FLAG_PREFIX as SOUL_FLAG_PREFIX, murmur3
 
 REPEATABLE = frozenset(('pots', 'bushes', 'rocks', 'crates', 'beehives', 'trees'))
@@ -699,7 +700,10 @@ def build_repeatable_packs(records, read_pack, read_raw, tables, progress=None):
             event, drop_ai, handover_ai = global_ai[EVENT_MEMBER], global_ai[DROP_AI_MEMBER], global_ai[HANDOVER_AI_MEMBER]
         # Dropped by its source: a falling pickup, not the standing token; it glows
         # under water (item_forms.GLOW_ACTOR).
-        standard = DROP_PREFIX + record['canonical']
+        replacement_world = replacement_bundle_actor(record['canonical'], 'world')
+        standard = (replacement_bundle_actor(record['canonical'], 'drop')
+                    if replacement_world and record.get('original_reward_actor') == replacement_world
+                    else DROP_PREFIX + record['canonical'])
         if record.get('underwater'):
             standard = underwater_actor(standard)
         raw, template = build_pack(standard, read_pack, byml_codec)

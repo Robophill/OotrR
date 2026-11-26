@@ -85,6 +85,7 @@ OPTIONAL_SKIPS = SKIP_OPTIONS + ('skulltulas_always_present',)
 LEGACY_SKIPS = {'skip_intro': 'skip_locked_cutscenes'}
 # Removed without replacement: NPC dialogue skips crashed in game (turbo A instead).
 DROPPED_SKIPS = ('skip_saria_dialogue', 'skip_npc_dialogues')
+LEGACY_ECONOMY_PRESETS = {'better_ammo': 'more_ammo'}
 
 
 @dataclass
@@ -95,6 +96,7 @@ class Settings:
     excluded_checks: list[str] = field(default_factory=list)
     avoid_vanilla: bool = True
     open_forest: bool = True
+    economy_preset: str = 'vanilla'
     # Omitted from ``to_dict`` while False. ``skip_locked_cutscenes`` covers the intro
     # and every other locked cutscene (area presentations never play: always on).
     skip_locked_cutscenes: bool = False
@@ -114,6 +116,8 @@ class Settings:
         for name in ('randomize_chests', 'avoid_vanilla', 'open_forest') + OPTIONAL_SKIPS:
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f'{name} must be a boolean.')
+        from oot_rando.patching.item_replacements import economy_replacements
+        economy_replacements(self.economy_preset)
         for name, allowed in [('pool', set(POOL)), ('excluded_checks', {str(h) for h in CHESTS})]:
             values = getattr(self, name)
             if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
@@ -168,19 +172,23 @@ class Settings:
 
     def to_dict(self):
         self.validate()
+        from oot_rando.patching.item_replacements import DEFAULT_ECONOMY_PRESET
         # ``full`` is omitted when unset so that earlier seeds keep their identity.
         return {f.name: (sorted(getattr(self, f.name)) if f.name in ('pool', 'excluded_checks')
                         else {name: self.categories.get(name, False) for name in sorted(CATEGORIES)}
                         if f.name == 'categories' else dict(sorted(rando_options.recorded(self.full).items()))
                         if f.name == 'full' else getattr(self, f.name))
                 for f in fields(self) if not (f.name in ('full', 'archipelago') and getattr(self, f.name) is None)
-                and not (f.name in OPTIONAL_SKIPS and not getattr(self, f.name))}
+                and not (f.name in OPTIONAL_SKIPS and not getattr(self, f.name))
+                and not (f.name == 'economy_preset' and getattr(self, f.name) == DEFAULT_ECONOMY_PRESET)}
 
     @classmethod
     def from_dict(cls, value):
         if not isinstance(value, dict):
             raise ValueError('Unknown settings or invalid format.')
         value = dict(value)
+        if value.get('economy_preset') in LEGACY_ECONOMY_PRESETS:
+            value['economy_preset'] = LEGACY_ECONOMY_PRESETS[value['economy_preset']]
         for dropped in DROPPED_SKIPS:
             value.pop(dropped, None)
         for legacy, current in LEGACY_SKIPS.items():
@@ -840,6 +848,12 @@ def generate(nup_path, output, settings, progress=None, save_seed_id=None, saves
             for path, fix in blue_fire_arrows.resource_fixes():
                 extra_raw[path] = fix(extra_raw.get(path) or decompress(read(path), d))
             skips['blue_fire_arrows'] = True
+        from oot_rando.patching import item_replacements
+        replacement_stats = item_replacements.apply_to_generation(
+            nup, members, raw_maps, extra_raw, plain_raw, new_files, d, read, report,
+            economy_preset=settings.economy_preset)
+        if replacement_stats is not None:
+            skips['item_replacements'] = replacement_stats
         from oot_rando.patching import magic_capacity
         skips['magic_capacity'] = magic_capacity.apply(
             extra_raw, new_files, lambda path: decompress(read(path), d))
@@ -920,6 +934,8 @@ def generate(nup_path, output, settings, progress=None, save_seed_id=None, saves
                                   + ([dict(p, category='full_' + ('chests' if p['source'] == 'chest' else p['source']))
                                       for p in full['spoiler']] if full else []),
                    'playthrough': full['playthrough'] if full else []}
+        item_replacements.update_spoiler(
+            spoiler, full, world, chests, skips.get('item_replacements'))
 
         def tracking_read(path):
             if path in extra_raw:
@@ -945,17 +961,19 @@ def generate(nup_path, output, settings, progress=None, save_seed_id=None, saves
                 if row:
                     actor = placement.get('after', '')
                     row['reward'] = reward_label(actor_item(actor, placement.get('folder', '')), actor)
+        from oot_rando.patching import item_replacements
+        item_replacements.update_tracker(tracking, full, world, chests, skips.get('item_replacements'))
         tracking_bytes = json.dumps(tracking, ensure_ascii=False, indent=2).encode('utf-8')
         manifest['tracking'] = {'schema_version': 1, 'sha256': sha256(tracking_bytes),
                                 'new_save_required': True, 'mode': 'save'}
         report('Writing the mod and its manifests atomically…')
+        documents = {'manifest.json': json_document(manifest), 'checks.json': json_document(checks),
+                     'spoiler.json': json_document(spoiler), 'tracking.json': tracking_bytes}
         def write_spoiler_text(staging):
             # Human-readable spoiler next to spoiler.json (not part of the manifest).
             from oot_rando.randomizer.spoiler_report import SPOILER_TEXT, load_report, write_text
             write_text(load_report(staging), staging / SPOILER_TEXT)
-        publish_mod(output, files, {'manifest.json': json_document(manifest), 'checks.json': json_document(checks),
-                                    'spoiler.json': json_document(spoiler), 'tracking.json': tracking_bytes},
-                    write_spoiler_text)
+        publish_mod(output, files, documents, write_spoiler_text)
         report('Generation done.')
         return manifest
     finally:
@@ -994,6 +1012,8 @@ def _build_full(nup, dictionaries_, members, settings, raw_maps, sources, read, 
         report('Glitchless placement and independent check…')
         plan = full_randomizer.plan(data, settings.full, groups, enemies, settings_identity(settings),
                                     settings.open_forest, report, extra=extra)
+    from oot_rando.patching import item_replacements
+    item_replacements.prepare_shop_rewards(plan, settings.economy_preset)
     from oot_rando.patching.repeatable_adapter import (prepare_repeatables, patch_repeatable_sources,
                                      build_repeatable_packs, register_repeatable_flags)
     repeatables = prepare_repeatables(plan, maps)

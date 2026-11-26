@@ -35,6 +35,21 @@ class SettingsTests(unittest.TestCase):
         self.assertNotEqual(settings_identity(a), settings_identity(Settings(a.seed, open_forest=False)))
         self.assertTrue(all(placements_for(a)[h] != old for h, old in CHESTS.items()))
 
+    def test_economy_preset_roundtrips_and_changes_identity(self):
+        current = Settings('economy')
+        self.assertNotIn('economy_preset', current.to_dict())
+        self.assertEqual(Settings.from_dict({'seed': 'economy'}).economy_preset, 'vanilla')
+
+        better_rupees = Settings('economy', economy_preset='better_rupees')
+        restored = Settings.from_dict(json.loads(json.dumps(better_rupees.to_dict())))
+        self.assertEqual(restored.economy_preset, 'better_rupees')
+        self.assertNotEqual(settings_identity(current), settings_identity(better_rupees))
+        with self.assertRaises(ValueError):
+            Settings('economy', economy_preset='unknown').validate()
+        self.assertEqual(
+            Settings.from_dict({'seed': 'economy', 'economy_preset': 'better_ammo'}).economy_preset,
+            'more_ammo')
+
     def test_require_all_keeps_the_identity_of_seeds_made_before_the_option(self):
         settings = full_settings(spiritual_stones='all')
         self.assertEqual(settings.full['spiritual_stones'], 'all')

@@ -58,6 +58,19 @@ NATIVE_WORLD = {
 }
 # Native world pickups found in maps or drop fields → canonical actor.
 WORLD_CANONICAL = {world: canonical for canonical, world in NATIVE_WORLD.items()}
+# Replacement bundles use compact pickup names and the quantity in the item name,
+# which can differ from the remake's native bundle quantity.
+REPLACEMENT_BUNDLES = {
+    'TBox_DekuNutBundle': ('Nut5', 5),
+    'Item_BombBundle_Small': ('Bomb5', 5),
+    'Item_BombchuBundle_Small': ('Bombchu5', 5),
+    'Item_BombchuBundle_Large': ('Bombchu10', 10),
+    'TBox_ArrowBundle_Small': ('Arrow5', 5),
+    'TBox_ArrowBundle_Medium': ('Arrow10', 10),
+    'TBox_ArrowBundle_Large': ('Arrow30', 30),
+    'TBox_DekuSeedBundle': ('Seed30', 30),
+}
+_BUNDLE_CANONICAL = {suffix: canonical for canonical, (suffix, _) in REPLACEMENT_BUNDLES.items()}
 # Pouch settings of a derived world pickup. The token's AI saves the gold
 # skulltula that dropped it (its Bool64bitKey rows) only when the get event
 # ends, so the event must play on every pickup, even at full capacity.
@@ -252,6 +265,9 @@ def is_derived(actor):
 def form_actor(canonical, form, skulltula_drop=False):
     """Actor giving ``canonical`` through a location of the given form.
 
+    ``drop`` uses a falling pickup for environment drops, retaining native
+    pickups that already use the drop AI.
+
     ``skulltula_drop``: a gold skulltula drops the pickup. Only the token's AI
     saves the skulltula when its drop is collected; the native pickups (rupees,
     ammo, hearts…) never do, so the skulltula and its check came back. Every
@@ -267,9 +283,22 @@ def form_actor(canonical, form, skulltula_drop=False):
         if native:
             return native + KIT_SUFFIX
         return WORLD_PREFIX + canonical
+    if form == 'drop':
+        native = NATIVE_WORLD.get(canonical)
+        if native and native not in (WORLD_TEMPLATE, 'Obj_Heart_Piece'):
+            return native
+        return DROP_PREFIX + canonical
     if form == 'shop':
         return canonical if canonical.startswith('Shop_') else SHOP_PREFIX + canonical
     raise ValueError('Forme inconnue : ' + form)
+
+
+def replacement_bundle_actor(canonical, form):
+    """Quantity-preserving pickup for a replacement bundle, if applicable."""
+    bundle = REPLACEMENT_BUNDLES.get(canonical)
+    if bundle is None or form not in ('world', 'drop'):
+        return None
+    return (WORLD_PREFIX if form == 'world' else DROP_PREFIX) + bundle[0]
 
 
 # The ocarinas are the accessory Link plays, not a holdable reward: their packs have
@@ -325,7 +354,8 @@ def canonical_of(derived):
         return WORLD_CANONICAL[native]
     for prefix in (WORLD_PREFIX, WATER_PREFIX, DROP_PREFIX, WATER_DROP_PREFIX, SHOP_PREFIX):
         if derived.startswith(prefix):
-            return derived[len(prefix):]
+            suffix = derived[len(prefix):]
+            return _BUNDLE_CANONICAL.get(suffix, suffix) if prefix != SHOP_PREFIX else suffix
     raise ValueError('Not a derived actor: ' + derived)
 
 
@@ -466,6 +496,23 @@ def build_pack(derived, read_pack, codec):
     pouch_path = f'Component/PouchContentParam/{derived}.game__component__PouchContentParam.bgyml'
     pouch = {'$parent': 'Work/' + _pack_path(pouch_ref)[:-len('.bgyml')] + '.gyml',
              'PouchActor': f'Work/Actor/{canonical}.engine__actor__ActorParam.gyml', 'DefaultAutoGet': True}
+    replacement_bundle = REPLACEMENT_BUNDLES.get(canonical)
+    if kind == 'world' and replacement_bundle and derived in {
+            prefix + replacement_bundle[0] for prefix in (WORLD_PREFIX, WATER_PREFIX, DROP_PREFIX, WATER_DROP_PREFIX)}:
+        bundle_ref = _pack_path(pouch_ref)
+        bundle = {}
+        while bundle_ref and bundle_ref in source:
+            data = codec.load(source[bundle_ref])['root']
+            if 'BundleActor' in data:
+                bundle['BundleActor'] = data['BundleActor']
+                break
+            parent = data.get('$parent')
+            bundle_ref = _pack_path(parent) if isinstance(parent, str) else None
+        if not bundle.get('BundleActor'):
+            raise ValueError('Bundle actor not found for ' + canonical)
+        pouch.update(BundleActor=bundle['BundleActor'], PouchActor=bundle['BundleActor'],
+                     BundleActorNum=replacement_bundle[1], IsBundle=True,
+                     EnableStock=False, MaxNumGameData='')
     if kind == 'world':
         pouch.update(WORLD_POUCH_FLAGS)
     files[pouch_path] = codec.dump({'endian': '<', 'version': 7, 'root': pouch})

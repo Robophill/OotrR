@@ -81,7 +81,7 @@ def lift_actors(raw, heights):
     return result
 
 
-def patch_strings(raw, changes):
+def patch_strings(raw, changes, byml_type=Byml):
     """Apply ``{path: tuple, before: str|None, after: str|bool}`` records.
 
     A boolean ``after`` is allowed for a new leaf (``before=None``) or to replace
@@ -92,8 +92,9 @@ def patch_strings(raw, changes):
     ``before=None`` means the leaf must be absent, not a BYML null. Missing
     dictionary ancestors may then be created. Array sizes never change.
     Both BYML byte orders are supported. Original raw bytes remain a prefix.
+    ``byml_type`` may supply a reader that preserves unrelated opaque values.
     """
-    byml = Byml(raw)
+    byml = byml_type(raw)
     endian, order = byml.endian, byml.byteorder
     records, paths, new_keys, new_strings = [], set(), set(), set()
     expected = copy.deepcopy(byml.root)
@@ -249,6 +250,6 @@ def patch_strings(raw, changes):
     new_root = node(root, raw[root], trie)
     struct.pack_into(endian + 'I', data, 12, new_root)
     result = bytes(data)
-    if Byml(result).root != expected:
+    if byml_type(result).root != expected:
         raise ValueError('BYML edit changed unexpected semantic content.')
     return result

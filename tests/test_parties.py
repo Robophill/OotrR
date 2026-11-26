@@ -114,6 +114,29 @@ class PartyTests(unittest.TestCase):
         self.assertTrue((self.library.bundle(party) / 'save/slot_00/screenshot.bin').exists())
         self.assertEqual(json.loads((self.library.folder(party['id']) / 'imported-tracker.json').read_text())['completed'], ['x'])
 
+    def test_capture_installed_accepts_removed_economy_preset(self):
+        import shutil
+        installed = self.mods / self.seed_a.name
+        shutil.copytree(self.seed_a, installed)
+        manifest_path = installed / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['settings']['economy_preset'] = 'better_ammo'
+        manifest['seed_id'] = hashlib.sha256(json.dumps(
+            {'generator': GENERATOR_VERSION, 'adapter': ADAPTER_VERSION,
+             'settings': manifest['settings']},
+            ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        (installed / 'checks.json').write_text(
+            json.dumps({'seed_id': manifest['seed_id'], 'checks': []}), encoding='utf-8')
+        installed = installed.rename(
+            self.mods / ('OoT_Randomizer_' + manifest['seed_id'][:16]))
+
+        party = self.create('Legacy economy', installed, capture=True)
+
+        self.assertEqual(party['seed_id'], manifest['seed_id'])
+        self.assertEqual(self.library.active_id, party['id'])
+        self.assertEqual(self.library.get(party['id'])['mod_name'], installed.name)
+
     def test_existing_unmanaged_seed_and_save_are_never_replaced(self):
         import shutil
         shutil.copytree(self.seed_a, self.mods / self.seed_a.name)
