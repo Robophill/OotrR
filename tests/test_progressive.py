@@ -4,13 +4,13 @@ Unit tests run everywhere; the flow tests need OOT_NUP (the game's own flows, pl
 by a small interpreter of the events the converter and the mailbox write).
 """
 import _src_path  # noqa: F401  (src on sys.path)
-import copy
 import os
 import unittest
 from collections import Counter
 
 from oot_rando.game.remake_world import PROGRESSIVE, STATIC_TIER_SOURCES, actor_item
 from oot_rando.patching import progressive
+from oot_rando.formats.evfl_tools import parse_flow
 
 NUP = os.environ.get('OOT_NUP')
 
@@ -111,8 +111,7 @@ class FlowRun:
     SHOW = {('GetPouchContent', 'DisplayGetByActorName')}
 
     def __init__(self, raw, names):
-        from oot_rando.patching.event_patch import _flow
-        self.entries = {e.name: e for e in _flow(raw).flowchart.entry_points}
+        self.entries = {e.name: e for e in parse_flow(raw).flowchart.entry_points}
         self.names = names            # the game's ActorInfo.ActorName of each actor
         self.pouch, self.flags, self.windows = Counter(), {}, []
 
@@ -254,9 +253,8 @@ class WithGame(unittest.TestCase):
 
     def test_converter_runs_first_in_both_item_get_entries(self):
         from oot_rando.patching.event_info import entry_calls
-        from oot_rando.patching.event_patch import _flow
-        before = {e.name: e.main_event.v.name for e in _flow(self.guide_before).flowchart.entry_points}
-        written = {e.name: e for e in _flow(self.guide).flowchart.entry_points}
+        before = {e.name: e.main_event.v.name for e in parse_flow(self.guide_before).flowchart.entry_points}
+        written = {e.name: e for e in parse_flow(self.guide).flowchart.entry_points}
         for name in progressive.GUIDE_ENTRIES:
             run = written[name].main_event.v
             self.assertEqual((run.data.res_flowchart_name, run.data.entry_point_name),
@@ -435,8 +433,7 @@ class WithGame(unittest.TestCase):
     def test_gifts_outside_item_gets_call_the_converter(self):
         from oot_rando.game.extra_sources import scan_npc_sources
         from oot_rando.patching.event_info import flow_name
-        from oot_rando.patching.event_patch import _flow
-        entries = scan_npc_sources(self.m, lambda path: _flow(self.read(path)))
+        entries = scan_npc_sources(self.m, lambda path: parse_flow(self.read(path)))
         sites = {gid: [(v['resource'], v['event']) for v in e['variants'] if 'event' in v]
                  for gid, e in entries.items()}
         darunia = 'npc#' + next(iter(STATIC_TIER_SOURCES))
@@ -450,7 +447,7 @@ class WithGame(unittest.TestCase):
         resource, events = next(iter(hooks.items()))
         self.assertEqual(progressive.hook_sites([sites[darunia]], self.current, covered={resource: {}}), {})
         raw = progressive.add_converter_calls(self.read(resource), events, flow_name(resource))
-        chart = _flow(raw).flowchart
+        chart = parse_flow(raw).flowchart
         named = {e.name: e for e in chart.events}
         call = named[events[0]].data.nxt.v
         self.assertEqual((call.name, call.data.res_flowchart_name, call.data.entry_point_name),

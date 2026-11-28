@@ -111,24 +111,10 @@ def zone_label(zone):
     return ZONE_LABELS.get(zone, zone)
 
 
-# Dungeon name used by AP item names, e.g. "Small Key (Forest Temple)".
-FOLDER_DUNGEON = {
-    'InsideTheDekuTree': 'Deku Tree', 'DodongoCavern': 'Dodongos Cavern',
-    'InsideJabuJabuBelly': 'Jabu Jabus Belly', 'ForestTemple': 'Forest Temple',
-    'FireTemple': 'Fire Temple', 'WaterTemple': 'Water Temple', 'ShadowTemple': 'Shadow Temple',
-    'SpiritTemple': 'Spirit Temple', 'BottomOfTheWell': 'Bottom of the Well',
-    'IceCavern': 'Ice Cavern', 'GerudoTrainingGround': 'Gerudo Training Ground',
-    'InsideGanonCastle': 'Ganons Castle',
-}
-# AP region "dungeon" field for each dungeon folder.
-FOLDER_AP_DUNGEON = {
-    'InsideTheDekuTree': 'Deku Tree', 'DodongoCavern': 'Dodongos Cavern',
-    'InsideJabuJabuBelly': 'Jabu Jabus Belly', 'ForestTemple': 'Forest Temple',
-    'FireTemple': 'Fire Temple', 'WaterTemple': 'Water Temple', 'ShadowTemple': 'Shadow Temple',
-    'SpiritTemple': 'Spirit Temple', 'BottomOfTheWell': 'Bottom of the Well',
-    'IceCavern': 'Ice Cavern', 'GerudoTrainingGround': 'Gerudo Training Ground',
-    'InsideGanonCastle': 'Ganons Castle',
-}
+from oot_rando.catalog.dungeons import (  # noqa: F401  (moved to oot_rando.catalog.dungeons, re-exported)
+    FOLDER_DUNGEON,
+    FOLDER_AP_DUNGEON,
+)
 
 ACTOR_ITEMS = {
     'TBox_Rupee_Green': 'Rupee (1)', 'TBox_Rupee_Blue': 'Rupees (5)', 'TBox_Rupee_Red': 'Rupees (20)',
@@ -184,21 +170,12 @@ ACTOR_ITEMS = {
 DUNGEON_ACTORS = {'Item_Dungeon_Map': 'Map', 'Item_Dungeon_Compass': 'Compass',
                   'Item_Dungeon_SmallKey': 'Small Key', 'Item_Dungeon_BossKey': 'Boss Key'}
 
-# Progressive families: remake actors in upgrade order. Every copy gives the level
-# above the one Link holds (``patching.progressive``).
-PROGRESSIVE = {
-    'Progressive Hookshot': ['Item_Hookshot', 'Item_Longshot'],
-    'Progressive Strength Upgrade': ['Item_Gauntlet_Goron', 'Item_Gauntlet_Silver', 'Item_Gauntlet_Gold'],
-    'Bomb Bag': ['Item_BombBag_Small', 'Item_BombBag_Medium', 'Item_BombBag_Large'],
-    'Bow': ['Item_Range_Bow', 'Item_Quiver_Medium', 'Item_Quiver_Large'],
-    'Slingshot': ['Item_Range_SlingShot', 'Item_BulletBag_Medium', 'Item_BulletBag_Large'],
-    'Progressive Scale': ['Item_Scale_Silver', 'Item_Scale_Gold'],
-    'Progressive Wallet': ['Item_Wallet_Medium', 'Item_Wallet_Large'],
-    'Deku Stick Capacity': ['Item_StickBag_Medium', 'Item_StickBag_Large'],
-    'Deku Nut Capacity': ['Item_NutBag_Medium', 'Item_NutBag_Large'],
-    'Magic Meter': ['Item_FairyBless_MP', 'Item_FairyBless_MPDouble'],
-    'Ocarina': ['Item_Ocarina_Fairy', 'Item_Ocarina_Time'],
-}
+from oot_rando.catalog.tokens import (  # noqa: F401  (moved to oot_rando.catalog.tokens, re-exported)
+    PROGRESSIVE,
+)
+from oot_rando.catalog.ap_items import ap_actor
+from oot_rando.catalog.ap_items import is_ap_item
+from oot_rando.catalog.traps import actor_trap, is_trap_actor, is_trap_item, trap_actor
 # Families whose NPC upgrades need the base item (chest) in the remake.
 BASE_REQUIRED = ('Bomb Bag', 'Bow', 'Slingshot')
 # Unshuffled sources giving a fixed tier (others upgrade dynamically).
@@ -218,15 +195,17 @@ def static_tier_gid(location):
 
 def actor_item(actor, folder):
     if actor.startswith('Item_Prog_'):
-        from oot_rando.patching.progressive import token_family
+        from oot_rando.catalog.tokens import token_family
         family = token_family(actor)
         if family:
             return family
     if actor.startswith(('Item_KeyRing_', 'Item_BossKey_', 'Item_Map_', 'Item_Compass_')):
-        from oot_rando.patching.key_adapter import key_actor_item
+        from oot_rando.catalog.keys import key_actor_item
         item = key_actor_item(actor)
         if item:
             return item
+    if is_trap_actor(actor):
+        return actor_trap(actor)
     if actor in DUNGEON_ACTORS:
         dungeon = FOLDER_DUNGEON.get(folder)
         if not dungeon:
@@ -240,15 +219,16 @@ def actor_item(actor, folder):
 
 def item_actor(item, folder):
     """Remake actor for an AP item placed in ``folder`` (dungeon items stay generic)."""
-    from oot_rando.patching.ap_item import ap_actor, is_ap_item
     if is_ap_item(item):
         return ap_actor(item)
+    if is_trap_item(item):
+        return trap_actor(item)
     if item.startswith('Small Key Ring ('):
-        from oot_rando.patching.key_adapter import item_folder, ring_actor
+        from oot_rando.catalog.keys import item_folder, ring_actor
         return ring_actor(item_folder(item))
     if item.startswith(('Map (', 'Compass (')):
         # Their own actor, credited wherever it is found (key_adapter).
-        from oot_rando.patching.key_adapter import dungeon_item_actor
+        from oot_rando.catalog.keys import dungeon_item_actor
         actor = dungeon_item_actor(item)
         if actor:
             return actor
@@ -260,7 +240,7 @@ def item_actor(item, folder):
         if item.startswith(prefix):
             return actor
     if item.startswith('Soul ('):
-        from oot_rando.patching.soul_adapter import soul_actor
+        from oot_rando.catalog.souls import soul_actor
         return soul_actor(item)
     if item in PROGRESSIVE:
         return PROGRESSIVE[item][0]   # its first level (forms the family's copies may take)

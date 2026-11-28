@@ -11,8 +11,8 @@ from oot_rando import parties
 from oot_rando.parties import PartyLibrary, validate_save_root
 from oot_rando.randomizer.randomizer_core import Settings, settings_identity, GENERATOR_VERSION, ADAPTER_VERSION
 from oot_rando.patching.randomize_kokiri import TITLE, BUILD
-from oot_rando.randomizer.randomizer_services import ManualTracker
-from oot_rando.tracker.save_patch import GameRunning
+from oot_rando.tracker.manual_tracker import ManualTracker
+from oot_rando.randomizer.save_patch import GameRunning
 
 
 def artifact(root, name):
@@ -231,14 +231,14 @@ class PartyTests(unittest.TestCase):
         b = self.create('B', self.seed_b)
         self.library.activate(a['id'])
         self.write_save(b'A')
-        original = parties._copy
+        original = parties.copy_verified
         def crash(source, destination):
             if destination.name.startswith('.party-stage-'):
                 destination.mkdir()
                 (destination / 'partial').write_bytes(b'incomplete')
                 raise SystemExit('power loss during copy')
             return original(source, destination)
-        with patch.object(parties, '_copy', crash):
+        with patch.object(parties, 'copy_verified', crash):
             with self.assertRaises(SystemExit):
                 self.library.activate(b['id'])
         recovered = PartyLibrary(self.library.root)
@@ -251,13 +251,13 @@ class PartyTests(unittest.TestCase):
         b = self.create('B', self.seed_b)
         self.library.activate(a['id'])
         self.write_save(b'A')
-        copy = parties._copy
+        copy = parties.copy_verified
         def failing(source, destination):
             if destination.name.startswith('.party-stage-'):
                 destination.mkdir()
                 raise OSError('disk full')
             return copy(source, destination)
-        with patch.object(parties, '_copy', failing):
+        with patch.object(parties, 'copy_verified', failing):
             with self.assertRaisesRegex(OSError, 'disk full'):
                 self.library.activate(b['id'])
         self.assertEqual(self.library.active_id, a['id'])
@@ -293,6 +293,27 @@ class PartyTests(unittest.TestCase):
         self.library.delete(b['id'])
         self.assertEqual(len(self.library.list()), 1)
         self.assertTrue(list((self.library.root / '.deleted').iterdir()))
+
+    def test_damaged_party_file_does_not_block_the_others(self):
+        a = self.create('A')
+        b = self.create('B', self.seed_b)
+        (self.library.folder(b['id']) / 'party.json').write_text('{truncated', encoding='utf-8')
+        self.assertEqual([p['id'] for p in self.library.list()], [a['id']])
+        self.assertEqual([folder for folder, _ in self.library.unreadable], [b['id']])
+        self.library.rename(a['id'], 'Still works')
+        self.library.activate(a['id'])
+        self.assertEqual(self.library.active_id, a['id'])
+
+    def test_library_index_is_written_durably(self):
+        synced = []
+        real = parties.os.fsync
+        with patch.object(parties.os, 'fsync', side_effect=lambda fd: (synced.append(fd), real(fd))):
+            self.create('A', capture=False)
+            a = self.library.list()[0]
+            self.library.activate(a['id'])
+        self.assertTrue(synced)
+        self.assertEqual(json.loads(self.library.index_path.read_text(encoding='utf-8'))['active'], a['id'])
+        self.assertFalse(self.library.index_path.with_suffix('.tmp').exists())
 
     def test_unsafe_and_overlapping_roots_are_refused(self):
         for bad in (self.base, self.base / 'mods', self.base / 'save', self.base / 'nand'):
@@ -344,7 +365,7 @@ class PartyTests(unittest.TestCase):
 
     def test_second_instance_cannot_recover_an_in_progress_transaction(self):
         p = self.create()
-        original = parties._copy
+        original = parties.copy_verified
         attempted = False
         def copying(source, destination):
             nonlocal attempted
@@ -353,7 +374,7 @@ class PartyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Another randomizer'):
                     PartyLibrary(self.library.root)
             return original(source, destination)
-        with patch.object(parties, '_copy', copying):
+        with patch.object(parties, 'copy_verified', copying):
             self.library.activate(p['id'])
         self.assertTrue(attempted)
         self.assertEqual(self.library.active_id, p['id'])

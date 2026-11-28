@@ -15,9 +15,9 @@ from evfl.flowchart import Flowchart
 from evfl.timeline import Timeline
 from evfl.util import make_rindex
 from oot_rando.formats import byml_codec
+from oot_rando.formats.evfl_tools import parse_flow
 from oot_rando.formats.inspect_resources import Byml, sarc
 from oot_rando.game.item_forms import canonical_of, replacement_bundle_actor
-from oot_rando.patching.event_patch import _flow
 from oot_rando.patching.item_replacements import (ECONOMY_PRESETS, apply_resource_replacements, apply_to_generation,
                                                    economy_preset_tooltip, economy_replacements,
                                                    _DROP_GLOBAL, _DropGlobalByml, _patch_drop_pack,
@@ -401,7 +401,7 @@ class ItemReplacementTests(unittest.TestCase):
 
         patched, count = patch_event_items(stream.getvalue(), {'Rupee (1)': 'Rupees (200)'})
 
-        params = _flow(patched).flowchart.events[0].data.params.data
+        params = parse_flow(patched).flowchart.events[0].data.params.data
         self.assertEqual(count, 1)
         self.assertEqual(params['ActorName'], 'TBox_Rupee_Gold')
         self.assertEqual(params['Unrelated'], 'TBox_Rupee_Green')

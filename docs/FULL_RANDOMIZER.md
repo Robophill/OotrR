@@ -63,6 +63,49 @@ shuffled reward only once (`repeatable_adapter.py`), then go back to their vanil
   non-progressive item, replacing filler), scarce (at most 3 bottles, half the
   hearts), minimal (one bottle, no hearts, double defense or capacity upgrades). The
   number of shuffled locations never changes.
+* **Fake item traps** (`fake_item_traps`, Items tab, `none` by default, not offered to
+  Archipelago). `some`: one fake copy of each major item of the pool (`catalog/traps.py`:
+  hookshot, bow, slingshot, boomerang, bomb bag, hammer, boots, strength, scale, lens,
+  magic, elemental arrows, spells, ocarina, Kokiri Sword, Mirror Shield, tunics, Stone
+  of Agony). `plentiful`: two copies of each of them, plus one of each medallion,
+  spiritual stone and song (in the pool or not). Each trap replaces a filler item
+  (rupees and ammunition, lowest value first; when filler runs out, the first copies
+  of the major items come first, then the dungeon rewards and songs, then the second
+  copies). Traps go into chests and ground checks (freestanding items, Gold
+  Skulltulas, pots, rocks, bushes, crates), never NPC gifts, scrubs or shops, whose
+  items may be given without the get event that writes the trap's `IsGet` flag (as
+  for the souls). They are junk for the logic. A trap is a pouch actor
+  `Item_Trap_<code>` (`<code>2` for a second copy: each copy has its own flags and
+  freezes once) built like the
+  souls, with the model, pose, name and description of the item it imitates (songs
+  have no description: their name stands in); its get
+  text says "Too bad, it's a trap!" (English and French; other languages read the
+  English text). Every item get ends in `ActionGuide/ActionGuide`: once a trap's
+  `IsGet` flag is set and its saved `RandoTrap.<code>` is not,
+  `GameSystemActor.EventTriggerRequestCreateConditionSensor` spawns
+  `RandoIceTrapSensor` (`patching/fake_traps.py`), the event the Sun's Song uses for
+  its own sensor. The copy carries the vanilla ice-trap chest attack (`Obj_TBox_A_04`,
+  damage element `Frozen`) and hits the player in a 1.5 m cylinder around Link
+  instead of enemies within 12 m: an enemy attack sensor (`Enemy_BabyDodongo`'s
+  `EnemyAttack` layer, `HitToPlayer` mask, `EnemyAttackReceipt` contacts) owned by an
+  object (`ObjectCommon` affiliation, as the trap chest and Twinrova's ice field).
+  Its own AI waits 30 frames (the end of the get event), attacks for 30 frames, then
+  removes the sensor. Each trap freezes once. Child Link cannot be frozen in the
+  vanilla game (`Player_Child` `ConditionParam`: `IsEnableFrozen: false`): with traps
+  in the seed it is turned on, so any ice attack can freeze child Link too. Earlier
+  tests were all made as child Link, which explains why the hits only hurt him. In
+  game (27/11) the first version, which kept the Sun's Song hit setup, did not touch
+  Link; the second, attacking at once, hurt him just after the text without freezing
+  him; with the child freeze on, he froze with no ice shell around him. His ELink
+  user (`Player`) plays `@Blank` for `Condition_Frozen` and `Condition_Frozen_End`.
+  With traps, adult Link's trees for those calls are grafted into it
+  (`formats/xlink.py`, `ELink2/elink2.Product.110.belnk`, the copy the game loads).
+  The shatter is copied as is; it shows in game (27/11). The adult shell is a grid
+  on the equipped weapon and its kind, with adult items only, so child Link matched
+  no cell and got no shell. He gets its whole-body branch (`全身凍結`: 16 poses and
+  the cap pieces) directly. The game only has the adult emitter sets
+  (`Ply_Frozen_*_Adult`), so the shell is sized for adult Link. **Not validated in
+  game**: the shell on child Link.
 * **Maps and compasses "Start with", small keys / boss keys "Removed"**: the saved
   `DungeonInfo.<folder>` values are written at the end of the opening
   (`event_patch.add_start_values`, `key_adapter.start_dungeon_values`):
@@ -603,6 +646,12 @@ outside the maps are not covered (except chest events).
     bean planting is also out of logic, including for the adult volcano heart.
 16. **Cuccos**: with 3 to bring back, the cucco lady's request says 3, her "left to find"
     count starts at 3, and she gives her reward once 3 are in the pen.
+17. **Fake item traps** (`fake_item_traps`): open a chest holding a trap. The real
+    item's model and name show, then "Too bad, it's a trap!", then Link is frozen
+    once; the same trap never freezes again (reload included). Check that a Kokiri
+    or Zora nearby is not frozen and that Link can move again. With `plentiful`, also
+    pick a trap on the ground (freestanding item, skulltula token), a second copy of
+    the same item (it freezes too), and a medallion or song trap.
 
 Known limits: some NPCs decide "already given" from the vanilla item (e.g. silver
 scale for the diving game) and can give their new item again; shop texts of

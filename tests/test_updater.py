@@ -184,6 +184,17 @@ class UpdaterTest(unittest.TestCase):
             updater.replace_executable(target, b'newer')   # a leftover .old is replaced
             self.assertEqual(target.with_name(target.name + '.old').read_bytes(), b'new')
 
+    def test_replace_failure_to_write_is_an_update_error(self):
+        # An OSError escaping here left the GUI believing an update was still running.
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / 'OoT-Randomizer.exe'
+            target.write_bytes(b'old')
+            with patch.object(Path, 'write_bytes', side_effect=OSError(28, 'No space left on device')):
+                with self.assertRaisesRegex(updater.UpdateError, 'Cannot write'):
+                    updater.replace_executable(target, b'new')
+            self.assertEqual(target.read_bytes(), b'old')
+            self.assertFalse(target.with_name(target.name + '.new').exists())
+
     def test_install_needs_frozen_build(self):
         if not updater.can_self_update():
             with self.assertRaises(updater.UpdateError):

@@ -6,6 +6,9 @@ runs as usual: seed marker, starting items and start values are written by the
 quest request (``Event8``), Link now leaves for the Temple of Time instead of playing
 the forest introduction:
 
+* a 30-frame ``EventSystemActor.EventWait`` (:data:`WAIT_EVENT`) first, behind the black
+  fade: without it the banc change raced the opening skip (``skip_opening``) and the
+  new game stalled on a black screen when the child castle skip was off;
 * ``Sequence_IsChildhood`` is set to false (the same flag the native child-to-adult
   scene ``Market_Child_Field_ChildToAdult`` sets);
 * the quest state of the native first adult arrival (``AllSage/Market_Adult_AllSage_Start``,
@@ -30,6 +33,8 @@ ANCHOR = 'Event8'                    # Opening_Introduction: after its quest req
 ERA_FLAG = 'Sequence_IsChildhood'
 ERA_EVENT = 'RandoAdultStart_Era'
 WARP_EVENT = 'RandoAdultStart_Warp'
+WAIT_EVENT = 'RandoAdultStart_Wait'
+WAIT_PARAMS = {'IsWaitEnd': True, 'Frames': 30}
 ARRIVAL_EVENTS = ('RandoAdultStart_AllSage', 'RandoAdultStart_Forest', 'RandoAdultStart_GotoAdult')
 # Challenge requests of AllSage/Event18 and Event19, parameter for parameter.
 _STEP = {'IsWaitEnd': True, 'IsIgnoreCompletedChallenge': False, 'IsIgnoreChallengeProgressUI': False}
@@ -52,12 +57,12 @@ def enabled(options):
 
 def event_params():
     """{event name: parameters} added to the opening flow."""
-    return {**ARRIVAL_PARAMS, ERA_EVENT: {'GameDataName': ERA_FLAG, 'Value': False, 'Index': -1},
+    return {WAIT_EVENT: dict(WAIT_PARAMS), **ARRIVAL_PARAMS, ERA_EVENT: {'GameDataName': ERA_FLAG, 'Value': False, 'Index': -1},
             WARP_EVENT: dict(WARP_PARAMS)}
 
 
 def patch_opening(raw, after=ANCHOR):
-    """Opening flow bytes where ``after`` leads to the era flag, then the Temple of Time.
+    """Opening flow bytes where ``after`` leads to a short wait, the era flag, then the Temple of Time.
 
     The forest introduction that followed ``after`` no longer plays. Returns (bytes, report)."""
     from evfl.util import make_index
@@ -71,12 +76,13 @@ def patch_opening(raw, after=ANCHOR):
                          ARRIVAL_PARAMS[ARRIVAL_EVENTS[1]], goto)
     sage = flow.action(ARRIVAL_EVENTS[0], 'ChallengeSystemActor', 'EventExecuteProgressChallengeStep',
                        ARRIVAL_PARAMS[ARRIVAL_EVENTS[0]], forest)
-    anchor.data.nxt = make_index(sage)
+    wait = flow.action(WAIT_EVENT, 'EventSystemActor', 'EventWait', WAIT_PARAMS, sage)
+    anchor.data.nxt = make_index(wait)
     result, events = flow.write()
     names, event = [], events[after].data.nxt.v
     while event is not None:
         names.append(event.name)
         event = event.data.nxt.v
-    if names != [*ARRIVAL_EVENTS, ERA_EVENT, WARP_EVENT]:
+    if names != [WAIT_EVENT, *ARRIVAL_EVENTS, ERA_EVENT, WARP_EVENT]:
         raise ValueError('Adult start wrongly chained.')
     return result, {'after': after, 'events': list(event_params()), 'banc': WARP_PARAMS['NextBanc']}

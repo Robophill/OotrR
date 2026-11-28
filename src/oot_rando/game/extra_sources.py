@@ -196,7 +196,7 @@ EVENT_GIFTS = (
     ('quest', ('DMT Biggoron',), (), (('Npc_Goron_Biggoron_Adult', 'Event123', 'Item_Sword_Biggoron'),)),
 )
 # Song locations: the silent add of each song cutscene (see patching/song_adapter.py).
-from oot_rando.patching.song_adapter import song_gifts as _song_gifts  # noqa: E402
+from oot_rando.catalog.songs import song_gifts as _song_gifts  # noqa: E402
 EVENT_GIFTS = EVENT_GIFTS + _song_gifts()
 # One-time business scrubs (``Enemy_Scrub_Business_Common``): the item sold is the
 # ``ActorName`` of each ``SimpleShopSub_Scrub_Business_OneTime`` call (one per

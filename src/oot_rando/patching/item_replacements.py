@@ -20,13 +20,14 @@ from typing import NamedTuple
 
 from oot_rando.formats.byml_writer import patch_strings
 from oot_rando.formats import byml_codec
+from oot_rando.formats.evfl_tools import parse_flow
 from oot_rando.formats.inspect_resources import Byml, decompress, sarc
 from oot_rando.game.item_forms import (DROP_PREFIX, NATIVE_WORLD, SHOP_PREFIX, WATER_DROP_PREFIX, WATER_PREFIX,
                                       WORLD_CANONICAL, WORLD_PREFIX, canonical_of, form_actor, is_derived,
                                       replacement_bundle_actor)
 from oot_rando.game.randomizer_categories import candidate_category
 from oot_rando.game.remake_world import ACTOR_ITEMS, actor_item, item_actor
-from oot_rando.patching.event_patch import _flow, patch_event_params
+from oot_rando.patching.event_patch import patch_event_params
 from oot_rando.patching.repeatable_adapter import REPEATABLE
 
 
@@ -247,7 +248,7 @@ def patch_event_items(raw, replacements, resource_path=None, replacement_cycle=N
     replacement_cycle = replacement_cycle or ReplacementCycle(replacements)
     from oot_rando.game.extra_sources import GIVE_PARAMS
 
-    flow = _flow(raw)
+    flow = parse_flow(raw)
     if flow.flowchart is None:
         if flow.timeline is None:
             raise ValueError(f'Event resource {resource_path!r} has neither a flowchart nor a timeline.')

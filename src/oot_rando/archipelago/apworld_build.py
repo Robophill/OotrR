@@ -10,6 +10,13 @@ from pathlib import Path
 import zipfile
 
 from oot_rando.paths import resource
+from oot_rando.formats.inspect_nup import Nup
+from oot_rando.formats.inspect_resources import dictionaries
+from oot_rando.game.extra_sources import scan_world
+from oot_rando.game.world_maps import effective_members
+from oot_rando.logic.world import World
+from oot_rando.patching.randomize_kokiri import BUILD
+from oot_rando.patching.randomize_kokiri import check_supported_game
 
 PACKAGE = 'oot_remake'
 WORLD_VERSION = '0.1.0'
@@ -22,14 +29,17 @@ VENDORED = ('__init__.py', 'paths.py',
             'game/randomizer_categories.py',
             'patching/__init__.py', 'patching/soul_adapter.py', 'patching/key_adapter.py', 'patching/ap_item.py',
             'patching/ap_mailbox.py', 'patching/song_adapter.py', 'patching/child_castle_skip.py',
-            'archipelago/__init__.py', 'archipelago/bridge.py')
+            'archipelago/__init__.py', 'archipelago/bridge.py',
+            'formats/__init__.py', 'formats/evfl_tools.py',
+            'catalog/__init__.py', 'catalog/ap_items.py', 'catalog/dungeons.py', 'catalog/hashing.py',
+            'catalog/keys.py', 'catalog/kokiri_chests.py', 'catalog/songs.py', 'catalog/souls.py', 'catalog/tokens.py',
+            'catalog/traps.py')
 # Becomes ``oot_remake/__init__.py``. Not a ``.py`` here: it imports Archipelago.
 TEMPLATE = 'archipelago/ap_world.py.in'
 
 
 def scan_game(nup_path, progress=None):
     """(game build, groups, enemies, extra) of a supported NUP, read-only."""
-    from oot_rando.formats.inspect_nup import Nup
     nup = Nup(nup_path)
     try:
         return _scan(nup, progress)
@@ -38,10 +48,6 @@ def scan_game(nup_path, progress=None):
 
 
 def _scan(nup, progress):
-    from oot_rando.formats.inspect_resources import dictionaries
-    from oot_rando.game.extra_sources import scan_world
-    from oot_rando.game.world_maps import effective_members
-    from oot_rando.patching.randomize_kokiri import BUILD, check_supported_game
     check_supported_game(nup)
     _, groups, enemies, extra = scan_world(nup, dictionaries(nup), effective_members(nup), progress)
     return BUILD, groups, enemies, extra
@@ -82,7 +88,6 @@ def write_apworld(catalog, output):
 def build_apworld(nup_path, output, progress=None):
     """Scan the game, build the catalog and write the apworld. Returns its path."""
     from oot_rando.archipelago.bridge import build_catalog
-    from oot_rando.logic.world import World
     report = progress or (lambda message: None)
     report('Reading the game…')
     build, groups, enemies, extra = scan_game(nup_path, report)

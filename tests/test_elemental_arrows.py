@@ -76,6 +76,13 @@ class GameTests(unittest.TestCase):
         for path, raw in before.items():
             if path != a.GAME_TABLE:
                 self.assertEqual(after[path], raw, path)
+        # Only native resources: the private file of the old patch crashed the inventory.
+        self.assertEqual(set(after), set(before) | {a.PARAM})
+        native = sarc(self.read('Pack/Actor/Weapon_Range_Bow.pack.zs'))[a.PARAM]
+        self.assertEqual(b.load(after[a.PARAM]), b.load(native))
+        old = dict(before)
+        old[a.OLD_PARAM] = b'stale'
+        self.assertEqual(a.patch_pack(b.build_sarc(old)), a.patch_pack(original))
         raw = self.read(a.TABLE)
         before, after = b.load(raw)['root'], b.load(a.patch_table(raw))['root']
         for old, new in zip(before, after):

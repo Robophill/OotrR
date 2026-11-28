@@ -15,6 +15,8 @@ import time
 import uuid
 
 from oot_rando.archipelago.bridge import GAME
+from oot_rando.patching.randomize_kokiri import TITLE
+from oot_rando.randomizer.artifact import read_artifact
 
 DEFAULT_PORT = 38281
 # Largest packet accepted from the server: data packages of big multiworlds are a few
@@ -440,9 +442,7 @@ def main(argv=None):
     """``ap-client MOD_FOLDER SERVER [--password P] [--slot NAME] [--save progress.sav]``: headless client."""
     import argparse
     from pathlib import Path
-    from oot_rando.randomizer.randomizer_services import read_artifact
     from oot_rando.tracker.auto_tracker import TrackerSession, newest_save
-    from oot_rando.patching.randomize_kokiri import TITLE
     parser = argparse.ArgumentParser(prog='ap-client', description=main.__doc__)
     parser.add_argument('mod', type=Path)
     parser.add_argument('server')

@@ -13,6 +13,7 @@ from collections import Counter
 from pathlib import Path
 
 from oot_rando.archipelago import bridge
+from oot_rando.randomizer.randomizer_core import settings_from_patch
 from oot_rando.logic import rando_options
 
 NUP = os.environ.get('OOT_NUP')
@@ -110,7 +111,7 @@ class Units(unittest.TestCase):
 
     def test_settings_must_match_patch(self):
         from oot_rando.randomizer.randomizer_core import Settings
-        settings = bridge.settings_from_patch(sample_patch())
+        settings = settings_from_patch(sample_patch())
         self.assertIsNotNone(settings.archipelago)
         self.assertIn('archipelago', settings.to_dict())
         self.assertNotIn('archipelago', Settings('x').to_dict())   # earlier seeds keep their identity
@@ -192,10 +193,10 @@ class WithGame(unittest.TestCase):
                 placements = {gid: {'item': 'Rupee (1)', 'own': True, 'sphere': None} for gid in world.c.shuffled}
                 patch = json.loads(json.dumps(world.patch(placements, [], '1', 'Moi', 1, self.build)))
                 self.assertEqual(patch['world'], World().fingerprint())
-                self.assertEqual(bridge.settings_from_patch(patch).full['spiritual_stones'], value)
+                self.assertEqual(settings_from_patch(patch).full['spiritual_stones'], value)
                 if value == 'all':
                     del patch['options']['spiritual_stones']
-                    self.assertEqual(bridge.settings_from_patch(patch).full['spiritual_stones'], 'all')
+                    self.assertEqual(settings_from_patch(patch).full['spiritual_stones'], 'all')
 
     def test_rules_and_victory(self):
         world = self.player()

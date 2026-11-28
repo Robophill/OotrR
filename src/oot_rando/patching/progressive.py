@@ -27,29 +27,31 @@ import io
 
 from oot_rando.game.remake_world import PROGRESSIVE
 
-TOKEN_PREFIX = 'Item_Prog_'
-APPLIED_PREFIX = 'RandoProg.'
+from oot_rando.catalog.tokens import (  # noqa: F401  (moved to oot_rando.catalog.tokens, re-exported)
+    TOKEN_PREFIX,
+    APPLIED_PREFIX,
+    FAMILIES,
+    FAMILY_OF_CODE,
+    token_actor,
+    token_family,
+    is_token,
+    applied_flag,
+    got_flag,
+)
+from oot_rando.formats.evfl_tools import case_target, params_by_event, parse_flow
+from oot_rando.formats import byml_codec
+from oot_rando.formats.inspect_resources import sarc
+from oot_rando.game.item_forms import SAME_MODEL
+from oot_rando.game.item_forms import copy_ref
+from oot_rando.game.item_forms import pack_path
+from oot_rando.game.item_forms import resolve_components
+from oot_rando.game.tracking_metadata import add_saved_flags
 ACTION_GUIDE_FLOW = 'Event/EventFlow/ActionGuide.bfevfl.zs'
 ACTION_GUIDE = 'ActionGuide'
 GUIDE_ENTRIES = ('ActionGuide', 'ActionGuideForShop')
 CONVERTER_ENTRY = 'RandoProgressive'
 GIVE_CALL = ('GetPouchContent', 'GetPouchContentByActorName')
 AFTER_PREFIX = 'RandoProgAfter_'
-# Family -> (actor code, English name, French name, actor lending its model).
-FAMILIES = {
-    'Progressive Hookshot': ('Hookshot', 'Hookshot', 'Grappin', 'Item_Hookshot'),
-    'Progressive Strength Upgrade': ('Strength', 'Strength', 'Force', 'Item_Gauntlet_Goron'),
-    'Bomb Bag': ('BombBag', 'Bomb Bag', 'Sac de bombes', 'Item_BombBag_Small'),
-    'Bow': ('Bow', 'Bow', 'Arc', 'Weapon_Range_Bow'),
-    'Slingshot': ('Slingshot', 'Slingshot', 'Lance-pierre', 'Weapon_Range_SlingShot'),
-    'Progressive Scale': ('Scale', 'Scale', 'Écaille', 'Item_Scale_Silver'),
-    'Progressive Wallet': ('Wallet', 'Wallet', 'Bourse', 'Item_Wallet_Medium'),
-    'Deku Stick Capacity': ('Sticks', 'Deku Sticks', 'Bâtons Mojo', 'Item_StickBag_Medium'),
-    'Deku Nut Capacity': ('Nuts', 'Deku Nuts', 'Noix Mojo', 'Item_NutBag_Medium'),
-    'Magic Meter': ('Magic', 'Magic', 'Magie', 'Item_FairyBless_MP'),
-    'Ocarina': ('Ocarina', 'Ocarina', 'Ocarina', 'Item_Ocarina_Fairy'),
-}
-FAMILY_OF_CODE = {code: family for family, (code, _, _, _) in FAMILIES.items()}
 # Pouch names (ActorInfo.ActorName) that differ from the level's actor; checked
 # against the game by check_pouch_names.
 POUCH_NAMES = {
@@ -58,30 +60,6 @@ POUCH_NAMES = {
     'Item_Gauntlet_Gold': 'Armor_Adult_Gauntlet_Gold',
 }
 HELD_BY_FLAG = ('Item_FairyBless_MP', 'Item_FairyBless_MPDouble')
-
-
-def token_actor(family, number):
-    return f'{TOKEN_PREFIX}{FAMILIES[family][0]}_{number}'
-
-
-def token_family(actor):
-    """Family of a token actor, or None."""
-    if not actor.startswith(TOKEN_PREFIX):
-        return None
-    code, _, number = actor[len(TOKEN_PREFIX):].rpartition('_')
-    return FAMILY_OF_CODE.get(code) if number.isdigit() else None
-
-
-def is_token(actor):
-    return token_family(actor) is not None
-
-
-def applied_flag(token):
-    return APPLIED_PREFIX + token
-
-
-def got_flag(token):
-    return 'IsGet.' + token
 
 
 def assign_tokens(copies):
@@ -108,7 +86,6 @@ def held_query(actor):
 
 def check_pouch_names(actor_info_raw, gamedata_raw):
     """Every level's pouch name is the one the game uses (and its magic flag a saved Bool)."""
-    from oot_rando.formats import byml_codec
     from oot_rando.patching.soul_adapter import murmur3
     rows = {row['__RowId']: row for row in byml_codec.load(actor_info_raw)['root']}
     saved = {int(e['Hash']) for e in byml_codec.load(gamedata_raw)['root']['Data']['Bool']
@@ -126,11 +103,10 @@ class FlowEditor:
     """New events in one flow, checked after writing: no existing parameter may change."""
 
     def __init__(self, raw, flow_name):
-        from oot_rando.patching.event_patch import _flow, _snapshot
-        self.flow = _flow(raw)
+        self.flow = parse_flow(raw)
         self.chart = self.flow.flowchart
         self.name = flow_name
-        self.expected = _snapshot(self.flow)
+        self.expected = params_by_event(self.flow)
 
     def actor(self, identifier):
         """A system actor of the flow, added with its vanilla parameters when missing."""
@@ -200,12 +176,11 @@ class FlowEditor:
 
     def write(self, what):
         """(bytes, re-read flow) once no parameter but the new ones changed."""
-        from oot_rando.patching.event_patch import _flow, _snapshot
         stream = io.BytesIO()
         self.flow.write(stream)
         result = stream.getvalue()
-        checked = _flow(result)
-        if _snapshot(checked) != self.expected:
+        checked = parse_flow(result)
+        if params_by_event(checked) != self.expected:
             raise ValueError(what + ' changed other parameters.')
         return result, checked
 
@@ -215,11 +190,6 @@ def link(event, target):
     from evfl.util import make_index
     if target is not None:
         event.data.nxt = make_index(target)
-
-
-def _case(event, key):
-    case = event.data.cases.get(key)
-    return case.v if case is not None else None
 
 
 def _named(event):
@@ -271,10 +241,10 @@ def check_tier_chain(start, name, tiers, given, done):
     for check_name, held, give in tier_events(name, len(tiers)):
         if event is None or event.name != check_name or not _is_query(event, tiers[held]):
             raise ValueError('Progressive levels wrongly chained: ' + name)
-        actor, after = given(_case(event, 0))
+        actor, after = given(case_target(event, 0))
         if actor != tiers[give] or _named(after) != done:
             raise ValueError('Progressive chain gives the wrong level: ' + name)
-        event = _case(event, 1)
+        event = case_target(event, 1)
     actor, after = given(event) if event is not None else (None, None)
     if _named(event) != name + '_Give0' or actor != tiers[0] or _named(after) != done:
         raise ValueError('Progressive chain without its first level: ' + name)
@@ -311,13 +281,13 @@ def check_lift_grade(event):
     for level in reversed(range(len(tiers))):
         if event is None or event.name != f'{LIFT_PREFIX}Has{level}' or not _is_query(event, tiers[level]):
             raise ValueError('Lift grade wrongly checked.')
-        grade = _case(event, 0)
+        grade = case_target(event, 0)
         if (_named(grade) != f'{LIFT_PREFIX}Set{level}' or getattr(grade.data.nxt, 'v', None) is not None
                 or grade.data.actor_action.v.v != 'EventTriggerSetGameDataEnum'
                 or dict(grade.data.params.data) != {'GameDataName': LIFT_GRADE, 'Value': LIFT_GRADES[level],
                                                     'Index': -1}):
             raise ValueError('Lift grade wrongly set.')
-        event = _case(event, 1)
+        event = case_target(event, 1)
     if event is not None:
         raise ValueError('Unexpected end of the lift grade.')
 
@@ -408,12 +378,12 @@ def check_converter(entry, tokens):
         held = event
         if (_named(held) != f'RandoProgHeld_{stem}'
                 or held.data.params.data != {'GameDataName': got_flag(token), 'Index': -1}
-                or _named(_case(held, 1)) != after):
+                or _named(case_target(held, 1)) != after):
             raise ValueError('Progressive token wrongly checked: ' + token)
-        done = _case(held, 0)
-        mark = _case(done, 1) if _named(done) == f'RandoProgDone_{stem}' else None
+        done = case_target(held, 0)
+        mark = case_target(done, 1) if _named(done) == f'RandoProgDone_{stem}' else None
         take = mark.data.nxt.v if mark is not None and mark.data.nxt is not None else None
-        if (mark is None or _named(_case(done, 0)) != after
+        if (mark is None or _named(case_target(done, 0)) != after
                 or done.data.params.data != {'GameDataName': applied_flag(token), 'Index': -1}
                 or mark.data.params.data != {'GameDataName': applied_flag(token), 'Index': -1, 'Value': True}
                 or _named(take) != f'RandoProgTake_{stem}'
@@ -421,7 +391,7 @@ def check_converter(entry, tokens):
             raise ValueError('Progressive token converted more than once: ' + token)
         check_tier_chain(take.data.nxt.v, f'RandoProgTier_{stem}', PROGRESSIVE[token_family(token)],
                          _given_by_window, after)
-        event = _case(held, 1)
+        event = case_target(held, 1)
     check_lift_grade(event)
 
 
@@ -453,7 +423,6 @@ def hook_sites(sources, current, covered=()):
     (Saria: the add, then the display) leaves the call to the last one.
     """
     from oot_rando.patching.event_info import flow_name, reachable
-    from oot_rando.patching.event_patch import _flow
     result = {}
     for sites in sources:
         by_resource = {}
@@ -462,7 +431,7 @@ def hook_sites(sources, current, covered=()):
                 by_resource.setdefault(resource, set()).add(event)
         for resource, events in sorted(by_resource.items()):
             name = flow_name(resource)
-            named = {e.name: e for e in _flow(current(name)).flowchart.events}
+            named = {e.name: e for e in parse_flow(current(name)).flowchart.events}
             for event in sorted(events):
                 if events & ({e.name for e in reachable(named[event])} - {event}):
                     continue
@@ -521,7 +490,6 @@ WATCH_NODES = ['SeqQueryGetNonStructGameDataBool', 'Element_BoolSelector', 'SeqQ
 def watch_event_row(settings_raw):
     """EventSetting row requesting the converter entry of ActionGuide (no actor)."""
     import copy
-    from oot_rando.formats import byml_codec
     document = byml_codec.load(settings_raw)
     rows = document['root']
     by_id = {row['__RowId']: row for row in rows}
@@ -540,14 +508,13 @@ def watch_event_row(settings_raw):
 def watch_analyzed_row(info_raw, current):
     """GameAnalyzedEventInfo row listing everything the converter calls. ``current(name)``: raw of a flow."""
     import copy
-    from oot_rando.formats import byml_codec
-    from oot_rando.patching.event_info import _cached_charts, closure, reachable_transitions
+    from oot_rando.patching.event_info import cached_charts, closure, reachable_transitions
     document = byml_codec.load(info_raw)
     rows = document['root']
     by_id = {row['__RowId']: row for row in rows}
     if WATCH_EVENT in by_id:
         raise ValueError('GameAnalyzedEventInfo row already present: ' + WATCH_EVENT)
-    current = _cached_charts(current)
+    current = cached_charts(current)
     call = (ACTION_GUIDE, CONVERTER_ENTRY)
     row = copy.deepcopy(by_id[WATCH_TEMPLATE_ANALYZED])
     flows = closure({call}, current) - {ACTION_GUIDE}
@@ -568,7 +535,7 @@ def patch_main_update(raw, tokens):
     """The global sequence with one watcher per token (7 nodes each, in groups under the root)."""
     import copy
     import ainb
-    from oot_rando.patching.ap_mailbox import WATCHER_GROUP, _input, ainb_to_binary
+    from oot_rando.patching.ap_mailbox import WATCHER_GROUP, ainb_input, ainb_to_binary
     document = ainb.AINB.from_binary(raw).as_dict()
     nodes = document['Nodes']
     root = nodes[0]
@@ -590,8 +557,8 @@ def patch_main_update(raw, tokens):
 
     def query(index, flag):
         return user(index, 'SeqQueryGetNonStructGameDataBool', {
-            'Int': [_input('GameDataIndex', -1, True)], 'Bool': [_input('IsDirect', True)],
-            'String': [_input('GameDataFullName', flag)]},
+            'Int': [ainb_input('GameDataIndex', -1, True)], 'Bool': [ainb_input('IsDirect', True)],
+            'String': [ainb_input('GameDataFullName', flag)]},
             {'Bool': [{'Name': 'Value', 'Is Output': True}]}, ['Is Query'],
             {'Bool': [{'Name': 'OutputOnlyOnEnter', 'Default Value': False, 'Flags': []}]})
 
@@ -615,7 +582,7 @@ def patch_main_update(raw, tokens):
             groups.append(group)
         got_q, got_s, applied_q, applied_s, request_i, idle_a, idle_b = range(len(nodes), len(nodes) + 7)
         request = user(request_i, 'SeqOneShotRequestEvent', {
-            'Bool': [_input('IsBancParamValue', False, True)], 'String': [_input('EventName', WATCH_EVENT)]},
+            'Bool': [ainb_input('IsBancParamValue', False, True)], 'String': [ainb_input('EventName', WATCH_EVENT)]},
             properties=once)
         idle = []
         for index in (idle_a, idle_b):
@@ -668,17 +635,18 @@ POSE_ASINFO = 'Item_GetDemo'
 
 def pose_lender(family):
     """Item actor whose animation states pose the family's model (same mesh)."""
-    from oot_rando.game.item_forms import SAME_MODEL
     model = FAMILIES[family][3]
     return SAME_MODEL.get(model, model)
 
 
 def pose_parts(read_raw, family):
     """``(files, components, actor_info)`` posing a token like its first level, or None."""
-    from oot_rando.formats import byml_codec
-    from oot_rando.formats.inspect_resources import sarc
-    from oot_rando.game.item_forms import _copy_ref, _pack_path, resolve_components
-    lender = pose_lender(family)
+    return actor_pose_parts(read_raw, pose_lender(family))
+
+
+def actor_pose_parts(read_raw, lender):
+    """``(files, components, actor_info)`` posing a generated item like ``lender``, or None
+    when ``lender`` is not made for the item-get display."""
     pack = sarc(read_raw(f'Pack/Actor/{lender}.pack.zs'))
     components = resolve_components(pack, lender, byml_codec)
     refs = {key: components.get(key) for key in POSE_KEYS}
@@ -686,10 +654,10 @@ def pose_parts(read_raw, family):
         return None
     files = {}
     for ref in refs.values():
-        _copy_ref(pack, ref, files, byml_codec)
-    animation = _pack_path(refs['AnimationRef'])
+        copy_ref(pack, ref, files, byml_codec)
+    animation = pack_path(refs['AnimationRef'])
     if animation not in files:
-        raise ValueError('Token pose animation not found: ' + lender)
+        raise ValueError('Item pose animation not found: ' + lender)
     resources = byml_codec.load(files[animation])['root'].get('AnimationResources')
     return files, refs, {'AnimationResources': resources}
 
@@ -713,7 +681,6 @@ def token_specs(tokens, read_raw=None):
 
 def build_token_files(read_raw, tokens, message_archives=()):
     """``(modified, new)`` resources of the token actors, plus their saved conversion flags."""
-    from oot_rando.game.tracking_metadata import add_saved_flags
     from oot_rando.patching.soul_adapter import GAMEDATA, RSDB_FILES, build_item_files
     if not tokens:
         return {}, {}
